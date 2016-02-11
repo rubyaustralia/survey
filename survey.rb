@@ -15,21 +15,27 @@ def normalise_values_and_combine_counts(values_by_count, &normalise_function)
   values_by_count.each_with_object(Hash.new(0)) { |r, h| k,v=*r; nk=normalise_function.call(k, v); h[nk] += v if nk!=nil }
 end
 
-def fibonacci_bucket_integer_key(key)
-  fib = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55]
+def bucket_integer_key(key, buckets = nil)
+  buckets ||= [0, 1, 2, 3, 5, 8, 13, 21, 34, 55]
   bucket = nil
-  (0..fib.size).each do |i|
+  (0..buckets.size).each do |i|
     begin
-      if key >= fib[i] && key < fib[i + 1]
-        bucket = "#{fib[i]} - #{fib[i + 1] - 1}"
+      if key >= buckets[i] && key < buckets[i + 1]
+        bucket = "#{buckets[i]} - #{buckets[i + 1]}"
         break
       end
     rescue
-      bucket = "#{fib[fib.size - 1]}+"
+      bucket = "#{buckets[buckets.size - 1]}+"
     end
   end
 
   bucket
+end
+
+def pp(hash)
+  hash.each do |k, v|
+    puts "#{k}\t#{v}"
+  end
 end
 
 rows = File.open('survey.csv', 'r') { |f| CSV.new(f.read, :headers => true, :header_converters => :symbol, :converters => :all) }.to_a.map(&:to_hash)
@@ -59,9 +65,10 @@ gender_counts = normalise_values_and_combine_counts(column_values_by_count(rows,
   end
 end
 pp gender_counts
+puts
 
 # :how_many_years_have_you_been_programming_with_ruby,
-puts "programming years"
+puts "How many years programming with ruby?"
 programming_years_count = normalise_values_and_combine_counts(column_values_by_count(rows, :how_many_years_have_you_been_programming_with_ruby)) do |k, v|
   nk = case k
   when /^\d+$/
@@ -85,13 +92,13 @@ programming_years_count = normalise_values_and_combine_counts(column_values_by_c
   else
     nil
   end
-  fibonacci_bucket_integer_key(nk)
+  bucket_integer_key(nk)
 end
 pp programming_years_count
 puts
 
 # :how_many_years_have_you_been_working_professionally_with_ruby,
-puts "working years"
+puts "How many years working professionally with ruby"
 working_years_count = normalise_values_and_combine_counts(column_values_by_count(rows, :how_many_years_have_you_been_working_professionally_with_ruby)) do |k, v|
   nk = case k
   when /^\d+$/
@@ -113,7 +120,7 @@ working_years_count = normalise_values_and_combine_counts(column_values_by_count
   else
     nil
   end
-  fibonacci_bucket_integer_key(nk)
+  bucket_integer_key(nk)
 end
 pp working_years_count
 puts
@@ -122,14 +129,24 @@ puts
 # TODO originating in aus vs everywhere else
 # then a table of where everyone else is from as percentage
 puts "country"
+sum_specified_country = 0
 country_counts = normalise_values_and_combine_counts(column_values_by_count(rows, :what_country_are_you_from)) do |k, v|
+  sum_specified_country += 1
   case k
-  when /australia/i
+  when /australia/i, "Aus"
     "Australia"
+  when /new zealand/i, "NZ"
+    "New Zealand"
+  when "UK", "United Kingdom", "England", "Northern Ireland", "Scotland"
+    "UK"
+  when "USA", "Murica", "United States"
+    "USA"
   else
-    "Everywhere else"
+    "Other"
   end
 end
+# Blank fields count as Australia because of how it's worded
+country_counts["Australia"] += rows.count - sum_specified_country - country_counts["Australia"]
 pp country_counts
 
 # EMPLOYER
@@ -137,15 +154,86 @@ puts "\n\n############################"
 puts "Ruby Employer Metrics"
 puts "############################\n"
 employer_metrics = [
-  :approximately_how_many_people_work_for_your_employer,
-  :approximately_how_many_people_write_ruby_for_your_employer,
   :is_your_employer_actively_hiring_ruby_developers_right_now,
-  :approximately_how_many_ruby_developers_has_your_employer_hired_in_the_past_12_months,
   :what_is_your_current_state_of_employment,
   :what_industry_is_your_employer_in,
   :what_work_location_policy_do_you_work_under,
 ]
 employer_metrics.map { |k| puts k; pp column_values_by_count(rows, k); puts }
+
+# :approximately_how_many_people_work_for_your_employer,
+puts "employer size (in employees)"
+employee_count = normalise_values_and_combine_counts(column_values_by_count(rows, :approximately_how_many_people_work_for_your_employer)) do |k, v|
+  nk = case k
+  when /^\d+$/
+    Integer(k)
+  when /\+|\~|,/
+    k.to_i
+  when "15-20"
+    17
+  when "150-200"
+    175
+  when "Over 1000", "thousands"
+    1000
+  else
+    nil
+  end
+
+  bucket_integer_key(nk, [0, 1, 5, 10, 50, 100, 1000, 25000, 100000])
+end
+pp employee_count
+puts
+
+# :approximately_how_many_people_write_ruby_for_your_employer,
+puts "how many rubyists in company"
+rubyist_count = normalise_values_and_combine_counts(column_values_by_count(rows, :approximately_how_many_people_write_ruby_for_your_employer)) do |k, v|
+  nk = case k
+  when /^\d+$/
+    Integer(k)
+  when "<5"
+    5
+  when "~15"
+    15
+  when "20+"
+    20
+  when "20-50"
+    35
+  when "~85"
+    85
+  when "Not sure. Over 100"
+    100
+  else
+    nil
+  end
+
+  bucket_integer_key(nk, [0, 1, 5, 10, 25, 50, 100, 1000])
+end
+pp rubyist_count
+puts
+
+puts "how many ruby devs hired past 12 months"
+ruby_devs_hired = normalise_values_and_combine_counts(column_values_by_count(rows, :approximately_how_many_ruby_developers_has_your_employer_hired_in_the_past_12_months)) do |k, v|
+  nk = case k
+  when /^\d+$/
+    Integer(k)
+  when "At least 2"
+    2
+  when "5-10"
+    7
+  when "10+"
+    10
+  when "~30"
+    30
+  when "25-50"
+    37
+  else
+    nil
+  end
+
+  bucket_integer_key(nk, [1, 5, 10, 25, 50, 100])
+end
+pp ruby_devs_hired
+puts
 
 puts "years operating (bucketed)"
 company_year_counts = normalise_values_and_combine_counts(column_values_by_count(rows, :how_many_years_has_your_employer_been_in_business)) do |k, v|
@@ -155,7 +243,7 @@ company_year_counts = normalise_values_and_combine_counts(column_values_by_count
   else
     nil
   end
-  fibonacci_bucket_integer_key(nk)
+  bucket_integer_key(nk)
 end
 pp company_year_counts
 
